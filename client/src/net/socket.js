@@ -63,19 +63,24 @@ function wire() {
 wire();
 
 // ---- Emitters ----
-export function createRoom(name, vehicle) {
+export function createRoom(name, vehicle, design) {
   return new Promise((resolve) => {
-    socket.emit("room:create", { name, vehicle }, (res) => resolve(res));
+    socket.emit("room:create", { name, vehicle, design }, (res) => resolve(res));
   });
 }
 
-export function joinRoom(code, name, vehicle) {
+export function joinRoom(code, name, vehicle, design) {
   return new Promise((resolve) => {
-    socket.emit("room:join", { code: code.toUpperCase(), name, vehicle }, (res) => resolve(res));
+    socket.emit("room:join", { code: code.toUpperCase(), name, vehicle, design }, (res) =>
+      resolve(res)
+    );
   });
 }
 
-export const chooseVehicle = (vehicle) => socket.emit("player:vehicle", { vehicle });
+// Loadout = performance vehicle + body design. Sent together so the server can
+// relay the visual choice to other racers.
+export const chooseVehicle = (vehicle, design) =>
+  socket.emit("player:vehicle", { vehicle, design });
 export const setReady = (ready) => socket.emit("player:ready", { ready });
 export const startRace = () => socket.emit("race:start");
 export const requestRematch = () => socket.emit("room:rematch");

@@ -94,27 +94,26 @@ function TouchControls() {
 
 function BackButton() {
   const [showConfirm, setShowConfirm] = useState(false);
-  const { setScreen, leaveRoom, setPrevScreen } = useStore();
+  const { goBack } = useStore();
 
-  const handleQuit = () => {
-    leaveRoom();
-    setScreen("menu");
-  };
+  // One step back from the race = the lobby (the scene unmounts, so the local
+  // car stops sending transforms automatically).
+  const handleBack = () => goBack();
 
   if (showConfirm) {
     return (
-      <div className="pointer-events-auto absolute top-6 right-6 z-50 flex flex-col gap-2">
-        <p className="text-xs text-white/60 text-center">Quit race?</p>
+      <div className="pointer-events-auto absolute top-4 left-4 z-50 flex flex-col gap-2 rounded-xl border border-white/15 bg-black/60 p-3 backdrop-blur">
+        <p className="text-center text-xs text-white/70">Leave the race?</p>
         <div className="flex gap-2">
           <button
-            onClick={handleQuit}
-            className="rounded-lg border-2 border-red-500/50 bg-red-500/10 px-3 py-1 font-display font-bold text-sm text-red-400 backdrop-blur transition hover:bg-red-500/20"
+            onClick={handleBack}
+            className="rounded-lg border-2 border-red-500/50 bg-red-500/10 px-3 py-1 font-display text-sm font-bold text-red-400 transition hover:bg-red-500/20"
           >
             Yes
           </button>
           <button
             onClick={() => setShowConfirm(false)}
-            className="rounded-lg border-2 border-cyan/50 bg-cyan/10 px-3 py-1 font-display font-bold text-sm text-cyan backdrop-blur transition hover:bg-cyan/20"
+            className="rounded-lg border-2 border-cyan/50 bg-cyan/10 px-3 py-1 font-display text-sm font-bold text-cyan transition hover:bg-cyan/20"
           >
             No
           </button>
@@ -126,7 +125,7 @@ function BackButton() {
   return (
     <button
       onClick={() => setShowConfirm(true)}
-      className="pointer-events-auto absolute top-6 right-6 z-40 rounded-lg border border-white/20 bg-black/40 px-4 py-2 font-display font-bold text-white/70 backdrop-blur transition hover:bg-black/60 hover:text-white hover:border-white/40"
+      className="pointer-events-auto absolute top-4 left-4 z-40 rounded-lg border border-white/20 bg-black/40 px-4 py-2 font-display font-bold text-white/70 backdrop-blur transition hover:border-white/40 hover:bg-black/60 hover:text-white"
     >
       « Back
     </button>
@@ -157,6 +156,10 @@ export default function Race() {
 
       <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 -translate-x-1/2 font-body text-xs uppercase tracking-widest text-white/30">
         WASD / arrows to drive
+      </div>
+
+      <div className="pointer-events-none absolute bottom-3 right-3 z-10 font-body text-xs uppercase tracking-widest text-white/40">
+        Developed by Abuzar
       </div>
     </div>
   );

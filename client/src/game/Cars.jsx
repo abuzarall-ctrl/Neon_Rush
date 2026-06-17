@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import CarMesh from "./CarMesh.jsx";
+import Powerups from "./Powerups.jsx";
 import { getVehicle } from "./vehicles.js";
 import { vehiclePhysics, clamp } from "./physics";
 import {
@@ -14,14 +15,21 @@ import {
 import { input, attachKeyboard, resetInput } from "./input";
 import { hud } from "./hud";
 import { useStore } from "./store";
-import { peerStates, sendTransform, sendFinish } from "../net/socket";
+import { peerStates, sendTransform, sendFinish, sendPowerupCollected } from "../net/socket";
+import { POWERUP_TYPES } from "./powerups.js";
 
-function LocalCar({ vehicleId, startIndex, raceStartTime }) {
+// Metres past the painted road edge before the car is treated as having hit the
+// barrier wall (which sits ~0.7m out). A small grace lets you clip the kerb
+// without an instant crash.
+const CRASH_MARGIN = 0.85;
+
+function LocalCar({ vehicleId, design, startIndex, raceStartTime }) {
   const ref = useRef();
   const phys = useMemo(() => vehiclePhysics(vehicleId), [vehicleId]);
   const vis = getVehicle(vehicleId);
   const { camera } = useThree();
   const tmp = useMemo(() => new THREE.Vector3(), []);
+  const zoom = useRef(15); // Default zoom distance
 
   const s = useRef(null);
   if (!s.current) {
@@ -36,10 +44,23 @@ function LocalCar({ vehicleId, startIndex, raceStartTime }) {
       passedHalf: false,
       finished: false,
       lastSend: 0,
+      boost: null, // { type, expiresAt }
     };
   }
 
-  useEffect(() => attachKeyboard(), []);
+  useEffect(() => {
+    attachKeyboard();
+
+    // Add wheel event listener for zooming
+    const handleWheel = (event) => {
+      zoom.current += event.deltaY * 0.01;
+      zoom.current = clamp(zoom.current, 8, 30); // Min/max zoom
+    };
+
+    window.addEventListener("wheel", handleWheel);
+    // Cleanup listener on component unmount
+    return () => window.removeEventListener("wheel", handleWheel);
+  }, []);
 
   // Re-seed on grid whenever a fresh race begins (raceStartTime changes).
   useEffect(() => {
@@ -53,6 +74,7 @@ function LocalCar({ vehicleId, startIndex, raceStartTime }) {
       prevIdx: nearestSample(g.x, g.z).index,
       passedHalf: false,
       finished: false,
+      boost: null,
     });
     resetInput();
   }, [startIndex, raceStartTime]);
@@ -64,8 +86,21 @@ function LocalCar({ vehicleId, startIndex, raceStartTime }) {
     const racing = store.raceStartTime != null && store.room?.status === "racing";
 
     if (racing && !st.finished) {
+      // Apply power-up effects
+      let currentPhys = phys;
+      if (st.boost && performance.now() < st.boost.expiresAt) {
+        const boostType = POWERUP_TYPES[st.boost.type];
+        currentPhys = {
+          ...phys,
+          accel: phys.accel * boostType.accelMultiplier,
+          maxSpeed: phys.maxSpeed * (1 + boostType.speedAdd),
+        };
+      } else if (st.boost) {
+        st.boost = null;
+      }
+
       // throttle / brake / coast
-      if (input.up) st.speed += phys.accel * dt;
+      if (input.up) st.speed += currentPhys.accel * dt;
       else if (input.down) st.speed -= phys.brakeForce * dt;
       else {
         const d = Math.sign(st.speed) * phys.coastDrag * dt;
@@ -76,26 +111,41 @@ function LocalCar({ vehicleId, startIndex, raceStartTime }) {
       // steering (needs motion; inverts in reverse)
       const steer = (input.left ? 1 : 0) - (input.right ? 1 : 0);
       const sf = Math.min(1, Math.abs(st.speed) / 6);
-      st.heading += steer * phys.turn * dt * sf * Math.sign(st.speed || 1);
+      st.heading += steer * currentPhys.turn * dt * sf * Math.sign(st.speed || 1);
 
-      // off-road penalty
-      if (offRoadAmount(st.x, st.z) > 0) {
+      // off-road penalty: a little drift onto the kerb just scrubs speed...
+      const off = offRoadAmount(st.x, st.z);
+      if (off > 0) {
         const cap = phys.maxSpeed * phys.offRoadCap;
         if (st.speed > cap) st.speed = Math.max(cap, st.speed * 0.9);
         st.speed *= 0.985;
       }
 
-      // TODO: Add barrier collision detection - temporarily disabled
-      // const crashed = checkBarrierCollision(st.x, st.z);
-      // if (crashed && !store.crashDetected) {
-      //   store.setCrashDetected(true);
-      //   store.setScreen("race-crash");
-      //   st.speed = 0;
-      // }
+      // ...but crossing the neon barrier wall ends the run -> Try Again screen.
+      if (off > CRASH_MARGIN && !store.crashDetected) {
+        store.setCrashDetected(true);
+        store.setScreen("race-crash");
+        st.speed = 0;
+        return;
+      }
 
       // integrate
       st.x += Math.sin(st.heading) * st.speed * dt;
       st.z += Math.cos(st.heading) * st.speed * dt;
+
+      // Check for power-up collection
+      store.room.powerups.forEach((p) => {
+        if (!p.collected) {
+          const dx = p.x - st.x;
+          const dz = p.z - st.z;
+          if (dx * dx + dz * dz < 4) {
+            // 2m radius
+            sendPowerupCollected(p.id);
+            const boostType = POWERUP_TYPES.BOOST;
+            st.boost = { type: boostType.id, expiresAt: performance.now() + boostType.duration };
+          }
+        }
+      });
 
       // lap detection via start-line crossing with a halfway gate
       const idx = nearestSample(st.x, st.z).index;
@@ -141,12 +191,12 @@ function LocalCar({ vehicleId, startIndex, raceStartTime }) {
     // chase camera
     const fx = Math.sin(st.heading);
     const fz = Math.cos(st.heading);
-    tmp.set(st.x - fx * 15, 8.5, st.z - fz * 15);
+    tmp.set(st.x - fx * zoom.current, 4 + zoom.current * 0.3, st.z - fz * zoom.current);
     camera.position.lerp(tmp, racing ? 0.12 : 0.06);
     camera.lookAt(st.x, 1.4, st.z);
   });
 
-  return <CarMesh ref={ref} color={vis.color} accent={vis.accent} />;
+  return <CarMesh ref={ref} color={vis.color} accent={vis.accent} design={design} />;
 }
 
 function RemoteCar({ player, index }) {
@@ -176,7 +226,7 @@ function RemoteCar({ player, index }) {
     }
   });
 
-  return <CarMesh ref={ref} color={vis.color} accent={vis.accent} name={player.name} />;
+  return <CarMesh ref={ref} color={vis.color} accent={vis.accent} design={player.design} />;
 }
 
 export default function Cars() {
@@ -191,9 +241,11 @@ export default function Cars() {
 
   return (
     <>
+      <Powerups />
       {me && (
         <LocalCar
           vehicleId={me.vehicle}
+          design={me.design}
           startIndex={Math.max(0, myIndex)}
           raceStartTime={raceStartTime}
         />

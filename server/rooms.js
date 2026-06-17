@@ -2,6 +2,7 @@
 // For horizontal scaling you'd move this into Redis, but the interface below
 // is intentionally small so that swap is contained.
 
+const { POWERUP_LOCATIONS } = require("../client/src/game/track");
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O/1/I/L to avoid confusion
 const CODE_LENGTH = 6;
 const TOTAL_LAPS = 3;
@@ -19,7 +20,10 @@ class RoomManager {
   constructor() {
     /** @type {Map<string, Room>} */
     this.rooms = new Map();
-    setInterval(() => this.reap(), 60_000).unref?.();
+    setInterval(() => {
+      this.reap();
+      this.respawnPowerups();
+    }, 1000).unref?.();
   }
 
   createRoom(host) {
@@ -34,6 +38,7 @@ class RoomManager {
       players: new Map(),
       createdAt: Date.now(),
       finishOrder: [],
+      powerups: this.initPowerups(),
     };
     this.rooms.set(code, room);
     this.addPlayer(room, host);
@@ -44,11 +49,12 @@ class RoomManager {
     return this.rooms.get((code || "").toUpperCase());
   }
 
-  addPlayer(room, { id, name, vehicle }) {
+  addPlayer(room, { id, name, vehicle, design }) {
     room.players.set(id, {
       id,
       name: name || "Racer",
       vehicle: vehicle || "comet",
+      design: design || "gt",
       ready: false,
       lap: 0,
       progress: 0, // 0..1 around the current lap, used for live standings
@@ -85,6 +91,7 @@ class RoomManager {
         id: p.id,
         name: p.name,
         vehicle: p.vehicle,
+        design: p.design,
         ready: p.ready,
         lap: p.lap,
         progress: p.progress,
@@ -92,6 +99,7 @@ class RoomManager {
         finishTime: p.finishTime,
         place: p.place,
       })),
+      powerups: room.powerups,
     };
   }
 
@@ -100,6 +108,29 @@ class RoomManager {
     for (const [code, room] of this.rooms) {
       if (now - room.createdAt > ROOM_TTL_MS && room.status !== "racing") {
         this.rooms.delete(code);
+      }
+    }
+  }
+
+  initPowerups() {
+    return POWERUP_LOCATIONS.map((loc) => ({
+      id: loc.id,
+      x: loc.x,
+      z: loc.z,
+      collected: false,
+      respawnAt: null,
+    }));
+  }
+
+  respawnPowerups() {
+    const now = Date.now();
+    for (const room of this.rooms.values()) {
+      for (const p of room.powerups) {
+        if (p.collected && p.respawnAt && now >= p.respawnAt) {
+          p.collected = false;
+          p.respawnAt = null;
+          // This needs to be broadcasted from index.js
+        }
       }
     }
   }

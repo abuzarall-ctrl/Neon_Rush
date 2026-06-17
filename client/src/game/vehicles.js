@@ -81,3 +81,35 @@ export const VEHICLE_MAP = Object.fromEntries(VEHICLES.map((v) => [v.id, v]));
 export function getVehicle(id) {
   return VEHICLE_MAP[id] || VEHICLES[0];
 }
+
+// Body styles the player can swap independently of the performance vehicle.
+// Each `shape` value is read by game/CarMesh.jsx to morph the 3D bodywork, so a
+// "Comet" can be raced as a GT coupe, an open roadster, a widebody, etc.
+export const CAR_DESIGNS = [
+  {
+    id: "gt",
+    name: "GT Coupe",
+    shape: "gt",
+    blurb: "Low, long, aerodynamic. The everyday supercar silhouette.",
+  },
+  {
+    id: "roadster",
+    name: "Roadster",
+    shape: "roadster",
+    blurb: "Open cockpit, dropped roofline. Pure top-down speed.",
+  },
+  {
+    id: "widebody",
+    name: "Widebody GT3",
+    shape: "widebody",
+    blurb: "Flared arches and a towering swan-neck wing. Track weapon.",
+  },
+  { id: "muscle", name: "M-Sport", shape: "muscle", blurb: "Broad-shouldered grand tourer. BMW-grade road presence." },
+  { id: "hyper", name: "Hypercar", shape: "hyper", blurb: "Knife-edge nose, canopy glass, twin fins. Concept-car drama." },
+];
+
+export const CAR_DESIGN_MAP = Object.fromEntries(CAR_DESIGNS.map((d) => [d.id, d]));
+
+export function getCarDesign(id) {
+  return CAR_DESIGN_MAP[id] || CAR_DESIGNS[0];
+}

@@ -3,7 +3,7 @@ import { useStore } from "../game/store.js";
 import { createRoom, joinRoom } from "../net/socket";
 
 export default function MainMenu() {
-  const { playerName, setName, vehicle, setRoom, setPlayerId, setScreen, setError, error } =
+  const { playerName, setName, vehicle, carDesign, setRoom, setPlayerId, setScreen, setError, error } =
     useStore();
   const [mode, setMode] = useState(null); // null | "join"
   const [code, setCode] = useState("");
@@ -15,7 +15,7 @@ export default function MainMenu() {
     if (!name) return setError("Enter a racer name first.");
     setBusy(true);
     setError(null);
-    const res = await createRoom(name, vehicle);
+    const res = await createRoom(name, vehicle, carDesign);
     setBusy(false);
     if (res?.ok) {
       setPlayerId(res.playerId);
@@ -30,7 +30,7 @@ export default function MainMenu() {
     if (code.trim().length !== 6) return setError("Race codes are 6 characters.");
     setBusy(true);
     setError(null);
-    const res = await joinRoom(code, name, vehicle);
+    const res = await joinRoom(code, name, vehicle, carDesign);
     setBusy(false);
     if (res?.ok) {
       setPlayerId(res.playerId);
@@ -123,6 +123,10 @@ export default function MainMenu() {
             {error}
           </p>
         )}
+      </div>
+
+      <div className="pointer-events-none absolute bottom-3 right-3 z-10 font-body text-xs uppercase tracking-widest text-white/40">
+        Developed by Abuzar
       </div>
     </div>
   );

@@ -100,40 +100,56 @@ function buildEdgeGeometry(side) {
   return g;
 }
 
-function buildBarriers() {
-  // Create collision barriers on the outside of the track
+const WALL_OFFSET = 0.7; // how far outside the road edge the barrier wall sits
+const WALL_HEIGHT = 1.5;
+
+function buildWallGeometry(side) {
+  // A continuous vertical neon barrier wall just outside the road edge. This is
+  // the "wall" the crash logic in Cars.jsx treats as a hard limit.
   const { left, right, tangents, segments } = TRACK;
-  const barriers = [];
-  
-  // Left side barriers
-  for (let i = 0; i < segments; i += 5) {
+  const src = side === "left" ? left : right;
+  const dir = side === "left" ? 1 : -1;
+  const outer = src.map((p, i) => {
     const t = tangents[i];
-    const e = left[i];
-    const nx = -t.z;
-    const nz = t.x;
-    barriers.push({
-      pos: { x: e.x + nx * 1.5, z: e.z + nz * 1.5 },
-      color: "#ff2e97",
-      side: "left",
-      index: i
-    });
+    const nx = -t.z * dir;
+    const nz = t.x * dir;
+    return { x: p.x + nx * WALL_OFFSET, z: p.z + nz * WALL_OFFSET };
+  });
+
+  const positions = [];
+  const y0 = 0.05;
+  const y1 = WALL_HEIGHT;
+  for (let i = 0; i < segments; i++) {
+    const a = outer[i];
+    const b = outer[(i + 1) % segments];
+    // two triangles forming the vertical strip a->b
+    positions.push(a.x, y0, a.z, a.x, y1, a.z, b.x, y0, b.z);
+    positions.push(a.x, y1, a.z, b.x, y1, b.z, b.x, y0, b.z);
   }
-  
-  // Right side barriers
-  for (let i = 0; i < segments; i += 5) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+function buildArches() {
+  // Neon gantry arches that span the road every so often for a sense of speed.
+  const { left, right, tangents, segments } = TRACK;
+  const palette = ["#ff2e97", "#19e3ff", "#b6ff3c", "#ffb627"];
+  const out = [];
+  const count = 6;
+  for (let a = 0; a < count; a++) {
+    const i = Math.round((a / count) * segments) % segments;
+    if (i === 0) continue; // leave room for the start gantry
+    const l = left[i];
+    const r = right[i];
+    const mid = { x: (l.x + r.x) / 2, z: (l.z + r.z) / 2 };
     const t = tangents[i];
-    const e = right[i];
-    const nx = -t.z;
-    const nz = t.x;
-    barriers.push({
-      pos: { x: e.x - nx * 1.5, z: e.z - nz * 1.5 },
-      color: "#19e3ff",
-      side: "right",
-      index: i
-    });
+    const angle = Math.atan2(t.x, t.z);
+    const width = Math.hypot(l.x - r.x, l.z - r.z) + WALL_OFFSET * 2;
+    out.push({ mid, angle, width, color: palette[a % palette.length] });
   }
-  
-  return barriers;
+  return out;
 }
 
 export default function Track() {
@@ -141,7 +157,9 @@ export default function Track() {
   const centerline = useMemo(buildCenterlineGeometry, []);
   const edgeL = useMemo(() => buildEdgeGeometry("left"), []);
   const edgeR = useMemo(() => buildEdgeGeometry("right"), []);
-  const barriers = useMemo(buildBarriers, []);
+  const wallL = useMemo(() => buildWallGeometry("left"), []);
+  const wallR = useMemo(() => buildWallGeometry("right"), []);
+  const arches = useMemo(buildArches, []);
 
   // Start/finish bar spanning the road at segment 0.
   const start = useMemo(() => {
@@ -157,7 +175,7 @@ export default function Track() {
   const pylons = useMemo(() => {
     const out = [];
     const palette = ["#ff2e97", "#19e3ff", "#ffb627", "#b6ff3c"];
-    for (let i = 0; i < TRACK.segments; i += 8) {
+    for (let i = 0; i < TRACK.segments; i += 12) {
       const t = TRACK.tangents[i];
       const e = TRACK.left[i];
       const nx = -t.z;
@@ -213,6 +231,32 @@ export default function Track() {
         <meshStandardMaterial color="#19e3ff" emissive="#19e3ff" emissiveIntensity={1.3} />
       </mesh>
 
+      {/* continuous neon barrier walls (the hard crash limit) */}
+      <mesh geometry={wallL}>
+        <meshStandardMaterial
+          color="#ff2e97"
+          emissive="#ff2e97"
+          emissiveIntensity={0.9}
+          metalness={0.4}
+          roughness={0.4}
+          side={THREE.DoubleSide}
+          transparent
+          opacity={0.85}
+        />
+      </mesh>
+      <mesh geometry={wallR}>
+        <meshStandardMaterial
+          color="#19e3ff"
+          emissive="#19e3ff"
+          emissiveIntensity={0.9}
+          metalness={0.4}
+          roughness={0.4}
+          side={THREE.DoubleSide}
+          transparent
+          opacity={0.85}
+        />
+      </mesh>
+
       {/* start / finish bar - enhanced */}
       <mesh position={[start.mid.x, 0.06, start.mid.z]} rotation={[-Math.PI / 2, 0, start.angle]}>
         <planeGeometry args={[start.width, 2.4]} />
@@ -237,12 +281,28 @@ export default function Track() {
         </group>
       ))}
 
-      {/* Track barriers for collision detection */}
-      {barriers.map((b, i) => (
-        <mesh key={`barrier-${i}`} position={[b.pos.x, 0.8, b.pos.z]} castShadow data-barrier={`${b.side}-${b.index}`}>
-          <boxGeometry args={[0.4, 1.6, 0.4]} />
-          <meshStandardMaterial color={b.color} emissive={b.color} emissiveIntensity={0.8} metalness={0.5} />
-        </mesh>
+      {/* neon gantry arches spanning the road */}
+      {arches.map((a, i) => (
+        <group key={`arch-${i}`} position={[a.mid.x, 0, a.mid.z]} rotation={[0, a.angle, 0]}>
+          {/* uprights */}
+          {[-a.width / 2, a.width / 2].map((x) => (
+            <mesh key={`post-${x}`} position={[x, 3, 0]} castShadow>
+              <boxGeometry args={[0.5, 6, 0.5]} />
+              <meshStandardMaterial color={a.color} emissive={a.color} emissiveIntensity={1.2} metalness={0.5} />
+            </mesh>
+          ))}
+          {/* cross beam */}
+          <mesh position={[0, 6, 0]} castShadow>
+            <boxGeometry args={[a.width + 0.5, 0.6, 0.6]} />
+            <meshStandardMaterial color={a.color} emissive={a.color} emissiveIntensity={1.4} metalness={0.5} />
+          </mesh>
+          {/* glow strip under the beam */}
+          <mesh position={[0, 5.6, 0]}>
+            <boxGeometry args={[a.width, 0.12, 0.2]} />
+            <meshStandardMaterial color="#ffffff" emissive={a.color} emissiveIntensity={2} />
+          </mesh>
+          <pointLight color={a.color} intensity={4} distance={40} position={[0, 6, 0]} />
+        </group>
       ))}
     </group>
   );

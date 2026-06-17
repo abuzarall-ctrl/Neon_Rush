@@ -9,6 +9,7 @@ export const TRACK = buildTrack({
   // Gentle "peanut" pinch so the oval has two distinct corner characters.
   pinch: 0.22,
 });
+export const POWERUP_LOCATIONS = getPowerupLocations();
 
 function buildTrack({ rx, rz, width, segments, pinch }) {
   const center = []; // {x, z}
@@ -125,11 +126,28 @@ export function gridSlot(i) {
   };
 }
 
+// Place power-ups at fixed locations around the track.
+function getPowerupLocations() {
+  const locations = [];
+  const segments = TRACK.segments;
+
+  // Place 4 speed boosts on the track
+  const indices = [
+    Math.floor(segments * 0.1),
+    Math.floor(segments * 0.4),
+    Math.floor(segments * 0.65),
+    Math.floor(segments * 0.9),
+  ];
+
+  indices.forEach((index, id) => locations.push({ id, ...TRACK.center[index] }));
+  return locations;
+}
+
 // Check for barrier collisions
 export function checkBarrierCollision(x, z) {
   // Barriers are placed on the outside of the track
   const barriers = [];
-  
+
   // Left side barriers
   for (let i = 0; i < TRACK.segments; i += 5) {
     const t = TRACK.tangents[i];
@@ -142,7 +160,7 @@ export function checkBarrierCollision(x, z) {
       radius: 0.5,
     });
   }
-  
+
   // Right side barriers
   for (let i = 0; i < TRACK.segments; i += 5) {
     const t = TRACK.tangents[i];
@@ -155,15 +173,9 @@ export function checkBarrierCollision(x, z) {
       radius: 0.5,
     });
   }
-  
+
   // Check distance to each barrier
-  for (const barrier of barriers) {
-    const dx = barrier.x - x;
-    const dz = barrier.z - z;
-    const dist = Math.hypot(dx, dz);
-    if (dist < barrier.radius + 1.2) { // 1.2 is roughly the car radius
-      return true;
-    }
-  }
+  const { dist } = nearestSample(x, z);
+  if (dist > TRACK.width / 2 + 0.7) return true; // 0.7m past the edge
   return false;
 }

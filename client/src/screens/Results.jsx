@@ -109,6 +109,10 @@ export default function Results() {
           </button>
         </div>
       </div>
+
+      <div className="pointer-events-none absolute bottom-3 right-3 z-10 font-body text-xs uppercase tracking-widest text-white/40">
+        Developed by Abuzar
+      </div>
     </div>
   );
 }

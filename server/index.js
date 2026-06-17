@@ -31,6 +31,22 @@ function pushRoom(room) {
   io.to(room.code).emit("room:update", rooms.publicState(room));
 }
 
+// Check for and respawn powerups periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const room of rooms.rooms.values()) {
+    let changed = false;
+    for (const p of room.powerups) {
+      if (p.collected && p.respawnAt && now >= p.respawnAt) {
+        p.collected = false;
+        p.respawnAt = null;
+        changed = true;
+      }
+    }
+    if (changed) pushRoom(room);
+  }
+}, 1000);
+
 function checkAllFinished(room) {
   const active = [...room.players.values()];
   if (active.length > 0 && active.every((p) => p.finished)) {
@@ -44,15 +60,15 @@ io.on("connection", (socket) => {
   // Track which room this socket belongs to for clean teardown.
   socket.data.code = null;
 
-  socket.on("room:create", ({ name, vehicle }, cb) => {
-    const room = rooms.createRoom({ id: socket.id, name, vehicle });
+  socket.on("room:create", ({ name, vehicle, design }, cb) => {
+    const room = rooms.createRoom({ id: socket.id, name, vehicle, design });
     socket.join(room.code);
     socket.data.code = room.code;
     cb?.({ ok: true, code: room.code, playerId: socket.id });
     pushRoom(room);
   });
 
-  socket.on("room:join", ({ code, name, vehicle }, cb) => {
+  socket.on("room:join", ({ code, name, vehicle, design }, cb) => {
     const room = rooms.getRoom(code);
     if (!room) return cb?.({ ok: false, error: "No race found with that code." });
     if (room.status !== "lobby")
@@ -60,18 +76,19 @@ io.on("connection", (socket) => {
     if (room.players.size >= 8)
       return cb?.({ ok: false, error: "That race is full (8 racers max)." });
 
-    rooms.addPlayer(room, { id: socket.id, name, vehicle });
+    rooms.addPlayer(room, { id: socket.id, name, vehicle, design });
     socket.join(room.code);
     socket.data.code = room.code;
     cb?.({ ok: true, code: room.code, playerId: socket.id });
     pushRoom(room);
   });
 
-  socket.on("player:vehicle", ({ vehicle }) => {
+  socket.on("player:vehicle", ({ vehicle, design }) => {
     const room = rooms.getRoom(socket.data.code);
     const p = room?.players.get(socket.id);
     if (p) {
-      p.vehicle = vehicle;
+      if (vehicle) p.vehicle = vehicle;
+      if (design) p.design = design;
       pushRoom(room);
     }
   });
@@ -147,6 +164,20 @@ io.on("connection", (socket) => {
     checkAllFinished(room);
   });
 
+  socket.on("player:collect_powerup", ({ id }) => {
+    const room = rooms.getRoom(socket.data.code);
+    if (!room || room.status !== "racing") return;
+    const powerup = room.powerups.find((p) => p.id === id);
+    const player = room.players.get(socket.id);
+
+    if (powerup && !powerup.collected && player) {
+      powerup.collected = true;
+      powerup.respawnAt = Date.now() + 10000; // 10 second respawn time
+      io.to(room.code).emit("powerup:collected", { powerupId: id, playerId: socket.id });
+      pushRoom(room); // Send updated powerup state
+    }
+  });
+
   socket.on("room:rematch", () => {
     const room = rooms.getRoom(socket.data.code);
     if (!room || room.hostId !== socket.id) return;
@@ -160,6 +191,7 @@ io.on("connection", (socket) => {
       p.finishTime = null;
       p.place = null;
     }
+    room.powerups = rooms.initPowerups();
     pushRoom(room);
   });
 

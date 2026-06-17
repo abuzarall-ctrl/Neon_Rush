@@ -46,8 +46,8 @@ export default function HUD() {
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10 select-none p-4 font-body">
-      {/* top-left: lap + clock */}
-      <div className="absolute left-4 top-4">
+      {/* top-left: lap + clock (sits below the Back button) */}
+      <div className="absolute left-4 top-20">
         <div className="rounded-2xl border border-cyan/30 bg-gradient-to-br from-black/60 to-black/40 px-4 py-3 backdrop-blur-md shadow-lg shadow-cyan/10">
           <p className="text-xs uppercase tracking-widest text-cyan/60">Lap Progress</p>
           <p className="mt-1 font-display text-4xl font-black text-white">
