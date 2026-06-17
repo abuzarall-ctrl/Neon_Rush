@@ -1,6 +1,7 @@
 import { useStore } from "./game/store.js";
 import MainMenu from "./screens/MainMenu.jsx";
 import VehicleSelect from "./screens/VehicleSelect.jsx";
+import CarDesignSelect from "./screens/CarDesignSelect.jsx";
 import Lobby from "./screens/Lobby.jsx";
 import Race from "./screens/Race.jsx";
 import Results from "./screens/Results.jsx";
@@ -14,6 +15,7 @@ export default function App() {
     <div className="relative h-full w-full">
       {screen === "menu" && <MainMenu />}
       {screen === "vehicle" && <VehicleSelect />}
+      {screen === "design" && <CarDesignSelect />}
       {screen === "lobby" && <Lobby />}
       {screen === "race" && <Race />}
       {screen === "race-crash" && <CrashScreen />}

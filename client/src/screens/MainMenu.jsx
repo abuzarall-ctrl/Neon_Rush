@@ -3,8 +3,7 @@ import { useStore } from "../game/store.js";
 import { createRoom, joinRoom } from "../net/socket";
 
 export default function MainMenu() {
-  const { playerName, setName, vehicle, carDesign, setRoom, setPlayerId, setScreen, setError, error } =
-    useStore();
+  const { playerName, setName, vehicle, carDesign, setPlayerId, setScreen, setError, error } = useStore();
   const [mode, setMode] = useState(null); // null | "join"
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);

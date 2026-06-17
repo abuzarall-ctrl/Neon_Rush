@@ -145,36 +145,6 @@ function getPowerupLocations() {
 
 // Check for barrier collisions
 export function checkBarrierCollision(x, z) {
-  // Barriers are placed on the outside of the track
-  const barriers = [];
-
-  // Left side barriers
-  for (let i = 0; i < TRACK.segments; i += 5) {
-    const t = TRACK.tangents[i];
-    const e = TRACK.left[i];
-    const nx = -t.z;
-    const nz = t.x;
-    barriers.push({
-      x: e.x + nx * 1.5,
-      z: e.z + nz * 1.5,
-      radius: 0.5,
-    });
-  }
-
-  // Right side barriers
-  for (let i = 0; i < TRACK.segments; i += 5) {
-    const t = TRACK.tangents[i];
-    const e = TRACK.right[i];
-    const nx = -t.z;
-    const nz = t.x;
-    barriers.push({
-      x: e.x - nx * 1.5,
-      z: e.z - nz * 1.5,
-      radius: 0.5,
-    });
-  }
-
-  // Check distance to each barrier
   const { dist } = nearestSample(x, z);
   if (dist > TRACK.width / 2 + 0.7) return true; // 0.7m past the edge
   return false;

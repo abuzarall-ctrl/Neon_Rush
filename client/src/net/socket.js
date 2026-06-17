@@ -99,3 +99,6 @@ export function sendTransform(t) {
 export function sendFinish(time) {
   socket.emit("player:finish", { time });
 }
+export function sendPowerupCollected(data) {
+  socket.emit("powerup:collected", data);
+}

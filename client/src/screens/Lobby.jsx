@@ -7,7 +7,17 @@ export default function Lobby() {
   const { room, playerId, leaveRoom } = useStore();
   const [copied, setCopied] = useState(false);
 
-  if (!room) return null;
+  if (!room) {
+    return (
+      <div className="relative flex h-full w-full items-center justify-center p-6">
+        <div className="neon-bg" />
+        <div className="neon-grid" />
+        <div className="relative z-10 font-display text-2xl text-white">
+          Joining lobby...
+        </div>
+      </div>
+    );
+  }
 
   const me = room.players.find((p) => p.id === playerId);
   const isHost = room.hostId === playerId;
