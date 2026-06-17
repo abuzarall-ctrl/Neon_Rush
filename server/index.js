@@ -1,0 +1,186 @@
+const path = require("path");
+const http = require("http");
+const express = require("express");
+const { Server } = require("socket.io");
+const { RoomManager } = require("./rooms");
+
+const PORT = process.env.PORT || 3001;
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: { origin: "*", methods: ["GET", "POST"] },
+});
+
+const rooms = new RoomManager();
+
+app.get("/health", (_req, res) => res.json({ ok: true, rooms: rooms.rooms.size }));
+
+// Serve the built client in production (client/dist).
+const clientDist = path.join(__dirname, "..", "client", "dist");
+app.use(express.static(clientDist));
+app.get("*", (_req, res) => {
+  res.sendFile(path.join(clientDist, "index.html"), (err) => {
+    if (err) res.status(200).send("Racing server running. Build the client to serve the UI.");
+  });
+});
+
+// Helper: broadcast the authoritative room state to everyone in it.
+function pushRoom(room) {
+  if (!room) return;
+  io.to(room.code).emit("room:update", rooms.publicState(room));
+}
+
+function checkAllFinished(room) {
+  const active = [...room.players.values()];
+  if (active.length > 0 && active.every((p) => p.finished)) {
+    room.status = "finished";
+    pushRoom(room);
+    io.to(room.code).emit("race:over", { standings: room.finishOrder });
+  }
+}
+
+io.on("connection", (socket) => {
+  // Track which room this socket belongs to for clean teardown.
+  socket.data.code = null;
+
+  socket.on("room:create", ({ name, vehicle }, cb) => {
+    const room = rooms.createRoom({ id: socket.id, name, vehicle });
+    socket.join(room.code);
+    socket.data.code = room.code;
+    cb?.({ ok: true, code: room.code, playerId: socket.id });
+    pushRoom(room);
+  });
+
+  socket.on("room:join", ({ code, name, vehicle }, cb) => {
+    const room = rooms.getRoom(code);
+    if (!room) return cb?.({ ok: false, error: "No race found with that code." });
+    if (room.status !== "lobby")
+      return cb?.({ ok: false, error: "That race has already started." });
+    if (room.players.size >= 8)
+      return cb?.({ ok: false, error: "That race is full (8 racers max)." });
+
+    rooms.addPlayer(room, { id: socket.id, name, vehicle });
+    socket.join(room.code);
+    socket.data.code = room.code;
+    cb?.({ ok: true, code: room.code, playerId: socket.id });
+    pushRoom(room);
+  });
+
+  socket.on("player:vehicle", ({ vehicle }) => {
+    const room = rooms.getRoom(socket.data.code);
+    const p = room?.players.get(socket.id);
+    if (p) {
+      p.vehicle = vehicle;
+      pushRoom(room);
+    }
+  });
+
+  socket.on("player:ready", ({ ready }) => {
+    const room = rooms.getRoom(socket.data.code);
+    const p = room?.players.get(socket.id);
+    if (p) {
+      p.ready = !!ready;
+      pushRoom(room);
+    }
+  });
+
+  socket.on("race:start", () => {
+    const room = rooms.getRoom(socket.data.code);
+    if (!room || room.hostId !== socket.id || room.status !== "lobby") return;
+
+    room.status = "countdown";
+    for (const p of room.players.values()) {
+      p.lap = 0;
+      p.progress = 0;
+      p.finished = false;
+      p.finishTime = null;
+      p.place = null;
+    }
+    room.finishOrder = [];
+    pushRoom(room);
+
+    // 3-2-1-GO. Clients run their own visual countdown; the server fires the
+    // authoritative start so everyone's clock begins together.
+    io.to(room.code).emit("race:countdown", { seconds: 3, startAt: Date.now() + 3000 });
+    setTimeout(() => {
+      if (rooms.getRoom(room.code)?.status === "countdown") {
+        room.status = "racing";
+        pushRoom(room);
+        io.to(room.code).emit("race:go", { startTime: Date.now() });
+      }
+    }, 3000);
+  });
+
+  // High-frequency position relay. The server stays authoritative over race
+  // state (laps validated below) but trusts clients for visual position —
+  // standard for arcade racers and keeps latency low.
+  socket.on("player:transform", (t) => {
+    const room = rooms.getRoom(socket.data.code);
+    if (!room || room.status !== "racing") return;
+    const p = room.players.get(socket.id);
+    if (!p || p.finished) return;
+    if (typeof t.progress === "number") p.progress = t.progress;
+    if (typeof t.lap === "number") p.lap = t.lap;
+    // Relay to everyone else in the room (not the sender).
+    socket.to(room.code).emit("peer:transform", { id: socket.id, ...t });
+  });
+
+  socket.on("player:finish", ({ time }) => {
+    const room = rooms.getRoom(socket.data.code);
+    if (!room || room.status !== "racing") return;
+    const p = room.players.get(socket.id);
+    if (!p || p.finished) return;
+
+    p.finished = true;
+    p.finishTime = time;
+    p.place = room.finishOrder.length + 1;
+    room.finishOrder.push({
+      id: p.id,
+      name: p.name,
+      vehicle: p.vehicle,
+      time,
+      place: p.place,
+    });
+    pushRoom(room);
+    io.to(room.code).emit("peer:finished", { id: p.id, place: p.place, time });
+    checkAllFinished(room);
+  });
+
+  socket.on("room:rematch", () => {
+    const room = rooms.getRoom(socket.data.code);
+    if (!room || room.hostId !== socket.id) return;
+    room.status = "lobby";
+    room.finishOrder = [];
+    for (const p of room.players.values()) {
+      p.ready = false;
+      p.lap = 0;
+      p.progress = 0;
+      p.finished = false;
+      p.finishTime = null;
+      p.place = null;
+    }
+    pushRoom(room);
+  });
+
+  socket.on("room:leave", () => leave());
+
+  socket.on("disconnect", () => leave());
+
+  function leave() {
+    const code = socket.data.code;
+    if (!code) return;
+    const room = rooms.removePlayer(code, socket.id);
+    socket.leave(code);
+    socket.data.code = null;
+    io.to(code).emit("peer:left", { id: socket.id });
+    if (room) {
+      pushRoom(room);
+      if (room.status === "racing") checkAllFinished(room);
+    }
+  }
+});
+
+server.listen(PORT, () => {
+  console.log(`\n🏁  Neon Rush server running on http://localhost:${PORT}\n`);
+});
