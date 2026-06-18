@@ -2,8 +2,10 @@ import { io } from "socket.io-client";
 import { useStore } from "../game/store.js";
 
 // In dev the UI runs on Vite (:5173) and talks to the standalone server (:3001).
-// In production both are served from the same origin.
-const SERVER_URL = import.meta.env.DEV ? "http://localhost:3001" : window.location.origin;
+// Production mein hamara Render ka backend chalega!
+const SERVER_URL = import.meta.env.DEV 
+  ? "http://localhost:3001" 
+  : "https://neon-rush-kty6.onrender.com"; 
 
 export const socket = io(SERVER_URL, { autoConnect: true, transports: ["websocket", "polling"] });
 

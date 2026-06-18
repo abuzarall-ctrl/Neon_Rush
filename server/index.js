@@ -1,3 +1,7 @@
+// 1. Load Environment variables and Supabase setup at the VERY top
+require('dotenv').config();
+const { createClient } = require('@supabase/supabase-js');
+
 const path = require("path");
 const http = require("http");
 const express = require("express");
@@ -11,6 +15,12 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: "*", methods: ["GET", "POST"] },
 });
+
+// Initialize Supabase Database Connection
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
 
 const rooms = new RoomManager();
 
@@ -117,8 +127,6 @@ io.on("connection", (socket) => {
     room.finishOrder = [];
     pushRoom(room);
 
-    // 3-2-1-GO. Clients run their own visual countdown; the server fires the
-    // authoritative start so everyone's clock begins together.
     io.to(room.code).emit("race:countdown", { seconds: 3, startAt: Date.now() + 3000 });
     setTimeout(() => {
       if (rooms.getRoom(room.code)?.status === "countdown") {
@@ -129,9 +137,6 @@ io.on("connection", (socket) => {
     }, 3000);
   });
 
-  // High-frequency position relay. The server stays authoritative over race
-  // state (laps validated below) but trusts clients for visual position —
-  // standard for arcade racers and keeps latency low.
   socket.on("player:transform", (t) => {
     const room = rooms.getRoom(socket.data.code);
     if (!room || room.status !== "racing") return;
@@ -139,11 +144,11 @@ io.on("connection", (socket) => {
     if (!p || p.finished) return;
     if (typeof t.progress === "number") p.progress = t.progress;
     if (typeof t.lap === "number") p.lap = t.lap;
-    // Relay to everyone else in the room (not the sender).
     socket.to(room.code).emit("peer:transform", { id: socket.id, ...t });
   });
 
-  socket.on("player:finish", ({ time }) => {
+  // --- CONNECTED TO SUPABASE HERE ---
+  socket.on("player:finish", async ({ time, topSpeed }) => {
     const room = rooms.getRoom(socket.data.code);
     if (!room || room.status !== "racing") return;
     const p = room.players.get(socket.id);
@@ -152,6 +157,7 @@ io.on("connection", (socket) => {
     p.finished = true;
     p.finishTime = time;
     p.place = room.finishOrder.length + 1;
+    
     room.finishOrder.push({
       id: p.id,
       name: p.name,
@@ -159,8 +165,27 @@ io.on("connection", (socket) => {
       time,
       place: p.place,
     });
+    
     pushRoom(room);
     io.to(room.code).emit("peer:finished", { id: p.id, place: p.place, time });
+
+    // Send the stats asynchronously to your live Supabase database
+    const { error } = await supabase
+      .from('leaderboard')
+      .insert([
+        { 
+          username: p.name, 
+          top_speed: topSpeed || 0, // Fallback to 0 if frontend doesn't track top speed yet
+          race_time: time 
+        }
+      ]);
+
+    if (error) {
+      console.error('❌ Supabase Save Error:', error.message);
+    } else {
+      console.log(`✅ Successfully saved stats for ${p.name} to the cloud database!`);
+    }
+
     checkAllFinished(room);
   });
 
@@ -172,9 +197,9 @@ io.on("connection", (socket) => {
 
     if (powerup && !powerup.collected && player) {
       powerup.collected = true;
-      powerup.respawnAt = Date.now() + 10000; // 10 second respawn time
+      powerup.respawnAt = Date.now() + 10000;
       io.to(room.code).emit("powerup:collected", { powerupId: id, playerId: socket.id });
-      pushRoom(room); // Send updated powerup state
+      pushRoom(room);
     }
   });
 
@@ -196,7 +221,6 @@ io.on("connection", (socket) => {
   });
 
   socket.on("room:leave", () => leave());
-
   socket.on("disconnect", () => leave());
 
   function leave() {
